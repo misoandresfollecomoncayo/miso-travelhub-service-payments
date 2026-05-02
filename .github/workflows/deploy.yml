@@ -71,7 +71,7 @@ jobs:
           flags: >-
             --allow-unauthenticated
             --port=8000
-            --service-account=${{ vars.RUNTIME_SERVICE_ACCOUNT }}
+            ${{ vars.RUNTIME_SERVICE_ACCOUNT && format('--service-account={0}', vars.RUNTIME_SERVICE_ACCOUNT) || '' }}
           env_vars: |
             APP_ENV=production
             APP_DEBUG=false
