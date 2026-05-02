@@ -1,8 +1,6 @@
-import pytest
 from httpx import AsyncClient
 
 
-@pytest.mark.asyncio
 async def test_payment_webhook_declined(client: AsyncClient) -> None:
     payload = {
         "status": "DECLINED",
@@ -20,12 +18,13 @@ async def test_payment_webhook_declined(client: AsyncClient) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["received"] is True
-    assert body["transactionId"] == payload["transactionId"]
-    assert body["status"] == "DECLINED"
+    assert body == {
+        "received": True,
+        "transactionId": payload["transactionId"],
+        "status": "DECLINED",
+    }
 
 
-@pytest.mark.asyncio
 async def test_payment_webhook_invalid_status(client: AsyncClient) -> None:
     payload = {
         "status": "UNKNOWN",
@@ -37,6 +36,22 @@ async def test_payment_webhook_invalid_status(client: AsyncClient) -> None:
         "maskedCard": "x",
         "transactionId": "tx",
         "processedAt": "2026-05-02T18:13:14.424Z",
+    }
+
+    response = await client.post("/api/v1/payment-webhook", json=payload)
+    assert response.status_code == 422
+
+
+async def test_payment_webhook_missing_field(client: AsyncClient) -> None:
+    payload = {
+        "status": "APPROVED",
+        "message": "ok",
+        "invoiceId": "1",
+        "amount": 10,
+        "currency": "COP",
+        "cardHolder": "x",
+        "maskedCard": "x",
+        "transactionId": "tx",
     }
 
     response = await client.post("/api/v1/payment-webhook", json=payload)
