@@ -20,6 +20,13 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
 
+    gcp_tasks_enabled: bool = False
+    gcp_project_id: str = ""
+    gcp_location: str = "us-central1"
+    gcp_tasks_queue: str = "payments-queue"
+    gcp_tasks_target_url: str = ""
+    gcp_tasks_service_account_email: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
