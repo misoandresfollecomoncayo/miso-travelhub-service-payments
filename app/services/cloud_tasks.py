@@ -48,8 +48,9 @@ class CloudTasksEnqueuer:
         s = self._settings
 
         if not s.gcp_tasks_enabled:
-            logger.info(
-                "cloud-tasks disabled; skipping enqueue tx=%s",
+            logger.warning(
+                "cloud-tasks DISABLED; skipping enqueue tx=%s "
+                "(set GCP_TASKS_ENABLED=true to enable)",
                 payload.transactionId,
             )
             return None

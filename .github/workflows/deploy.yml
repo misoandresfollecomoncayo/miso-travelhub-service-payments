@@ -68,7 +68,16 @@ jobs:
           service: ${{ env.SERVICE_NAME }}
           region: ${{ env.GCP_REGION }}
           image: ${{ env.IMAGE_URI }}
-          flags: --allow-unauthenticated --port=8000
+          flags: >-
+            --allow-unauthenticated
+            --port=8000
+            --service-account=${{ vars.RUNTIME_SERVICE_ACCOUNT }}
           env_vars: |
             APP_ENV=production
             APP_DEBUG=false
+            GCP_TASKS_ENABLED=${{ vars.GCP_TASKS_ENABLED }}
+            GCP_PROJECT_ID=${{ vars.GCP_PROJECT_ID }}
+            GCP_LOCATION=${{ vars.GCP_LOCATION }}
+            GCP_TASKS_QUEUE=${{ vars.GCP_TASKS_QUEUE }}
+            GCP_TASKS_TARGET_URL=${{ vars.GCP_TASKS_TARGET_URL }}
+            GCP_TASKS_SERVICE_ACCOUNT_EMAIL=${{ vars.GCP_TASKS_SERVICE_ACCOUNT_EMAIL }}
