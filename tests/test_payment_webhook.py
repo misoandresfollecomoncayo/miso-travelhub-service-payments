@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from httpx import AsyncClient
 
-from tests.conftest import FakeCloudTasksEnqueuer
+from tests.conftest import FakeCloudTasksEnqueuer, FakePaymentRepository
 
 
 VALID_PAYLOAD = {
@@ -67,7 +67,9 @@ async def test_payment_webhook_returns_503_on_config_error(
     assert response.json() == {"detail": "payment queue unavailable"}
 
 
-async def test_payment_webhook_process_worker(client: AsyncClient) -> None:
+async def test_payment_webhook_process_worker_persists(
+    client: AsyncClient, fake_payment_repository: FakePaymentRepository
+) -> None:
     response = await client.post(
         "/api/v1/payment-webhook/process", json=VALID_PAYLOAD
     )
@@ -77,3 +79,33 @@ async def test_payment_webhook_process_worker(client: AsyncClient) -> None:
         "status": "processed",
         "transactionId": VALID_PAYLOAD["transactionId"],
     }
+
+    assert len(fake_payment_repository.saved) == 1
+    saved = fake_payment_repository.saved[0]
+    assert saved.transaction_id == VALID_PAYLOAD["transactionId"]
+    assert saved.invoice_id == VALID_PAYLOAD["invoiceId"]
+    assert saved.status == VALID_PAYLOAD["status"]
+    assert saved.amount == Decimal(str(VALID_PAYLOAD["amount"]))
+    assert saved.currency == VALID_PAYLOAD["currency"]
+    assert saved.card_holder == VALID_PAYLOAD["cardHolder"]
+    assert saved.masked_card == VALID_PAYLOAD["maskedCard"]
+
+
+async def test_payment_webhook_process_worker_is_idempotent(
+    client: AsyncClient, fake_payment_repository: FakePaymentRepository
+) -> None:
+    first = await client.post(
+        "/api/v1/payment-webhook/process", json=VALID_PAYLOAD
+    )
+    second = await client.post(
+        "/api/v1/payment-webhook/process", json=VALID_PAYLOAD
+    )
+
+    assert first.status_code == 200
+    assert first.json()["status"] == "processed"
+    assert second.status_code == 200
+    assert second.json() == {
+        "status": "duplicate",
+        "transactionId": VALID_PAYLOAD["transactionId"],
+    }
+    assert len(fake_payment_repository.saved) == 1

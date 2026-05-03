@@ -81,3 +81,5 @@ jobs:
             GCP_TASKS_QUEUE=${{ vars.GCP_TASKS_QUEUE }}
             GCP_TASKS_TARGET_URL=${{ vars.GCP_TASKS_TARGET_URL }}
             GCP_TASKS_SERVICE_ACCOUNT_EMAIL=${{ vars.GCP_TASKS_SERVICE_ACCOUNT_EMAIL }}
+          secrets: |
+            DATABASE_URL=DATABASE_URL:latest

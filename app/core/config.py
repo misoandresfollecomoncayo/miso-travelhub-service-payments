@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     gcp_tasks_target_url: str = ""
     gcp_tasks_service_account_email: str = ""
 
+    database_url: str = ""
+    database_echo: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

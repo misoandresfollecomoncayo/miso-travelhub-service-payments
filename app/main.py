@@ -13,6 +13,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _log_database_config() -> None:
+    s = get_settings()
+    if not s.database_url:
+        logger.warning(
+            "DATABASE_URL is not set. /payment-webhook/process will return 503."
+        )
+        return
+    # Avoid logging credentials embedded in the URL.
+    scheme, _, rest = s.database_url.partition("://")
+    host_part = rest.split("@", 1)[-1] if "@" in rest else rest
+    logger.info("Database configured: %s://***@%s", scheme or "?", host_part)
+
+
 def _log_cloud_tasks_config() -> None:
     s = get_settings()
     if not s.gcp_tasks_enabled:
@@ -67,6 +80,7 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router, prefix="/api/v1")
 
+    _log_database_config()
     _log_cloud_tasks_config()
 
     return app
