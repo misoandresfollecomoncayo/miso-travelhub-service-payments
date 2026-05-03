@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from httpx import AsyncClient
 
-from tests.conftest import FakeCloudTasksEnqueuer, FakePaymentRepository
+from tests.conftest import FakePaymentRepository
 
 
 VALID_PAYLOAD = {
@@ -18,8 +18,8 @@ VALID_PAYLOAD = {
 }
 
 
-async def test_payment_webhook_enqueues_and_returns_202(
-    client: AsyncClient, fake_enqueuer: FakeCloudTasksEnqueuer
+async def test_payment_webhook_persists_and_returns_202(
+    client: AsyncClient, fake_payment_repository: FakePaymentRepository
 ) -> None:
     response = await client.post("/api/v1/payment-webhook", json=VALID_PAYLOAD)
 
@@ -28,56 +28,6 @@ async def test_payment_webhook_enqueues_and_returns_202(
         "received": True,
         "transactionId": VALID_PAYLOAD["transactionId"],
         "status": "DECLINED",
-    }
-
-    assert len(fake_enqueuer.calls) == 1
-    enqueued = fake_enqueuer.calls[0]
-    assert enqueued.transactionId == VALID_PAYLOAD["transactionId"]
-    assert enqueued.invoiceId == VALID_PAYLOAD["invoiceId"]
-    assert enqueued.amount == Decimal("123")
-    assert enqueued.currency == "COP"
-
-
-async def test_payment_webhook_invalid_status_does_not_enqueue(
-    client: AsyncClient, fake_enqueuer: FakeCloudTasksEnqueuer
-) -> None:
-    payload = {**VALID_PAYLOAD, "status": "UNKNOWN"}
-
-    response = await client.post("/api/v1/payment-webhook", json=payload)
-
-    assert response.status_code == 422
-    assert fake_enqueuer.calls == []
-
-
-async def test_payment_webhook_missing_field(client: AsyncClient) -> None:
-    payload = {k: v for k, v in VALID_PAYLOAD.items() if k != "transactionId"}
-
-    response = await client.post("/api/v1/payment-webhook", json=payload)
-    assert response.status_code == 422
-
-
-async def test_payment_webhook_returns_503_on_config_error(
-    client: AsyncClient, fake_enqueuer: FakeCloudTasksEnqueuer
-) -> None:
-    fake_enqueuer.raise_config_error = True
-
-    response = await client.post("/api/v1/payment-webhook", json=VALID_PAYLOAD)
-
-    assert response.status_code == 503
-    assert response.json() == {"detail": "payment queue unavailable"}
-
-
-async def test_payment_webhook_process_worker_persists(
-    client: AsyncClient, fake_payment_repository: FakePaymentRepository
-) -> None:
-    response = await client.post(
-        "/api/v1/payment-webhook/process", json=VALID_PAYLOAD
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "status": "processed",
-        "transactionId": VALID_PAYLOAD["transactionId"],
     }
 
     assert len(fake_payment_repository.saved) == 1
@@ -91,21 +41,30 @@ async def test_payment_webhook_process_worker_persists(
     assert saved.masked_card == VALID_PAYLOAD["maskedCard"]
 
 
-async def test_payment_webhook_process_worker_is_idempotent(
+async def test_payment_webhook_invalid_status_does_not_persist(
     client: AsyncClient, fake_payment_repository: FakePaymentRepository
 ) -> None:
-    first = await client.post(
-        "/api/v1/payment-webhook/process", json=VALID_PAYLOAD
-    )
-    second = await client.post(
-        "/api/v1/payment-webhook/process", json=VALID_PAYLOAD
-    )
+    payload = {**VALID_PAYLOAD, "status": "UNKNOWN"}
 
-    assert first.status_code == 200
-    assert first.json()["status"] == "processed"
-    assert second.status_code == 200
-    assert second.json() == {
-        "status": "duplicate",
-        "transactionId": VALID_PAYLOAD["transactionId"],
-    }
+    response = await client.post("/api/v1/payment-webhook", json=payload)
+
+    assert response.status_code == 422
+    assert fake_payment_repository.saved == []
+
+
+async def test_payment_webhook_missing_field(client: AsyncClient) -> None:
+    payload = {k: v for k, v in VALID_PAYLOAD.items() if k != "transactionId"}
+
+    response = await client.post("/api/v1/payment-webhook", json=payload)
+    assert response.status_code == 422
+
+
+async def test_payment_webhook_is_idempotent(
+    client: AsyncClient, fake_payment_repository: FakePaymentRepository
+) -> None:
+    first = await client.post("/api/v1/payment-webhook", json=VALID_PAYLOAD)
+    second = await client.post("/api/v1/payment-webhook", json=VALID_PAYLOAD)
+
+    assert first.status_code == 202
+    assert second.status_code == 202
     assert len(fake_payment_repository.saved) == 1
