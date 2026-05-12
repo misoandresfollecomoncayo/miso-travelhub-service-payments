@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from httpx import AsyncClient
 
-from tests.conftest import FakePaymentRepository
+from tests.conftest import FakePaymentEventPublisher
 
 
 VALID_PAYLOAD = {
@@ -18,8 +18,8 @@ VALID_PAYLOAD = {
 }
 
 
-async def test_payment_webhook_persists_and_returns_202(
-    client: AsyncClient, fake_payment_repository: FakePaymentRepository
+async def test_payment_webhook_publishes_and_returns_202(
+    client: AsyncClient, fake_publisher: FakePaymentEventPublisher
 ) -> None:
     response = await client.post("/api/v1/payment-webhook", json=VALID_PAYLOAD)
 
@@ -30,26 +30,25 @@ async def test_payment_webhook_persists_and_returns_202(
         "status": "DECLINED",
     }
 
-    assert len(fake_payment_repository.saved) == 1
-    saved = fake_payment_repository.saved[0]
-    assert saved.transaction_id == VALID_PAYLOAD["transactionId"]
-    assert saved.invoice_id == VALID_PAYLOAD["invoiceId"]
-    assert saved.status == VALID_PAYLOAD["status"]
-    assert saved.amount == Decimal(str(VALID_PAYLOAD["amount"]))
-    assert saved.currency == VALID_PAYLOAD["currency"]
-    assert saved.card_holder == VALID_PAYLOAD["cardHolder"]
-    assert saved.masked_card == VALID_PAYLOAD["maskedCard"]
+    assert len(fake_publisher.published) == 1
+    published = fake_publisher.published[0]
+    assert published.transactionId == VALID_PAYLOAD["transactionId"]
+    assert published.invoiceId == VALID_PAYLOAD["invoiceId"]
+    assert published.amount == Decimal(str(VALID_PAYLOAD["amount"]))
+    assert published.currency == VALID_PAYLOAD["currency"]
+    assert published.cardHolder == VALID_PAYLOAD["cardHolder"]
+    assert published.maskedCard == VALID_PAYLOAD["maskedCard"]
 
 
-async def test_payment_webhook_invalid_status_does_not_persist(
-    client: AsyncClient, fake_payment_repository: FakePaymentRepository
+async def test_payment_webhook_invalid_status_does_not_publish(
+    client: AsyncClient, fake_publisher: FakePaymentEventPublisher
 ) -> None:
     payload = {**VALID_PAYLOAD, "status": "UNKNOWN"}
 
     response = await client.post("/api/v1/payment-webhook", json=payload)
 
     assert response.status_code == 422
-    assert fake_payment_repository.saved == []
+    assert fake_publisher.published == []
 
 
 async def test_payment_webhook_missing_field(client: AsyncClient) -> None:
@@ -59,12 +58,25 @@ async def test_payment_webhook_missing_field(client: AsyncClient) -> None:
     assert response.status_code == 422
 
 
-async def test_payment_webhook_is_idempotent(
-    client: AsyncClient, fake_payment_repository: FakePaymentRepository
+async def test_payment_webhook_returns_503_on_config_error(
+    client: AsyncClient, fake_publisher: FakePaymentEventPublisher
 ) -> None:
-    first = await client.post("/api/v1/payment-webhook", json=VALID_PAYLOAD)
-    second = await client.post("/api/v1/payment-webhook", json=VALID_PAYLOAD)
+    fake_publisher.raise_config_error = True
 
-    assert first.status_code == 202
-    assert second.status_code == 202
-    assert len(fake_payment_repository.saved) == 1
+    response = await client.post("/api/v1/payment-webhook", json=VALID_PAYLOAD)
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "payment event bus unavailable"}
+    assert fake_publisher.published == []
+
+
+async def test_payment_webhook_returns_502_on_publish_error(
+    client: AsyncClient, fake_publisher: FakePaymentEventPublisher
+) -> None:
+    fake_publisher.raise_publish_error = True
+
+    response = await client.post("/api/v1/payment-webhook", json=VALID_PAYLOAD)
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "payment event publish failed"}
+    assert fake_publisher.published == []

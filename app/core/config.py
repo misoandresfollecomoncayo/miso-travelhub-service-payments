@@ -20,15 +20,19 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
 
-    gcp_tasks_enabled: bool = False
-    gcp_project_id: str = ""
-    gcp_location: str = "us-central1"
-    gcp_tasks_queue: str = "payments-queue"
-    gcp_tasks_target_url: str = ""
-    gcp_tasks_service_account_email: str = ""
-
-    database_url: str = ""
-    database_echo: bool = False
+    # Kafka producer (broker corre en una VM de GCP).
+    kafka_enabled: bool = False
+    kafka_bootstrap_servers: str = ""
+    kafka_topic: str = "payments-events"
+    kafka_client_id: str = "miso-travelhub-service-payments"
+    kafka_acks: str = "all"
+    kafka_request_timeout_ms: int = 10000
+    # PLAINTEXT | SSL | SASL_PLAINTEXT | SASL_SSL
+    kafka_security_protocol: str = "PLAINTEXT"
+    # PLAIN | SCRAM-SHA-256 | SCRAM-SHA-512 (solo si security_protocol incluye SASL)
+    kafka_sasl_mechanism: str = ""
+    kafka_sasl_username: str = ""
+    kafka_sasl_password: str = ""
 
 
 @lru_cache

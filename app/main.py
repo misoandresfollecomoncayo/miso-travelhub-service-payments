@@ -1,10 +1,12 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
+from app.services.kafka_producer import KafkaPaymentPublisher
 
 logging.basicConfig(
     level=logging.INFO,
@@ -13,52 +15,53 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _log_database_config() -> None:
+def _log_kafka_config() -> None:
     s = get_settings()
-    if not s.database_url:
+    if not s.kafka_enabled:
         logger.warning(
-            "DATABASE_URL is not set. /payment-webhook/process will return 503."
-        )
-        return
-    # Avoid logging credentials embedded in the URL.
-    scheme, _, rest = s.database_url.partition("://")
-    host_part = rest.split("@", 1)[-1] if "@" in rest else rest
-    logger.info("Database configured: %s://***@%s", scheme or "?", host_part)
-
-
-def _log_cloud_tasks_config() -> None:
-    s = get_settings()
-    if not s.gcp_tasks_enabled:
-        logger.warning(
-            "Cloud Tasks DISABLED (GCP_TASKS_ENABLED=false). "
-            "Webhook payloads will NOT be enqueued."
+            "Kafka DISABLED (KAFKA_ENABLED=false). "
+            "/payment-webhook will return 503."
         )
         return
 
     missing = [
         name
         for name, value in (
-            ("GCP_PROJECT_ID", s.gcp_project_id),
-            ("GCP_TASKS_QUEUE", s.gcp_tasks_queue),
-            ("GCP_TASKS_TARGET_URL", s.gcp_tasks_target_url),
+            ("KAFKA_BOOTSTRAP_SERVERS", s.kafka_bootstrap_servers),
+            ("KAFKA_TOPIC", s.kafka_topic),
         )
         if not value
     ]
     if missing:
         logger.error(
-            "Cloud Tasks ENABLED but misconfigured. Missing: %s",
-            ", ".join(missing),
+            "Kafka ENABLED but misconfigured. Missing: %s", ", ".join(missing)
         )
         return
 
     logger.info(
-        "Cloud Tasks ENABLED: project=%s location=%s queue=%s target=%s sa=%s",
-        s.gcp_project_id,
-        s.gcp_location,
-        s.gcp_tasks_queue,
-        s.gcp_tasks_target_url,
-        s.gcp_tasks_service_account_email or "(none)",
+        "Kafka ENABLED: bootstrap=%s topic=%s protocol=%s sasl=%s",
+        s.kafka_bootstrap_servers,
+        s.kafka_topic,
+        s.kafka_security_protocol,
+        s.kafka_sasl_mechanism or "(none)",
     )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+    publisher = KafkaPaymentPublisher(settings)
+    try:
+        await publisher.start()
+    except Exception:
+        # Don't fail container startup just because Kafka is unreachable —
+        # the endpoint will return 503 until the broker comes back.
+        logger.exception("Kafka producer failed to start; endpoint will 503")
+    app.state.payment_event_publisher = publisher
+    try:
+        yield
+    finally:
+        await publisher.stop()
 
 
 def create_app() -> FastAPI:
@@ -68,6 +71,7 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version="0.1.0",
         debug=settings.app_debug,
+        lifespan=lifespan,
     )
 
     app.add_middleware(
@@ -80,8 +84,7 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router, prefix="/api/v1")
 
-    _log_database_config()
-    _log_cloud_tasks_config()
+    _log_kafka_config()
 
     return app
 
