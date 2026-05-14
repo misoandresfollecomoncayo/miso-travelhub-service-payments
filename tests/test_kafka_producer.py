@@ -232,6 +232,25 @@ async def test_publish_success(fake_kafka) -> None:
     assert b'"transactionId":"TX-1"' in sent["value"]
 
 
+async def test_publish_refunded_uses_invoiceid_as_partition_key(fake_kafka) -> None:
+    """REFUNDED without transactionId falls back to invoiceId for the Kafka key."""
+    refund_payload = PaymentWebhookPayload(
+        status=PaymentWebhookStatus.REFUNDED,
+        message="Reembolso emitido",
+        invoiceId="INV-9",
+    )
+
+    pub = KafkaPaymentPublisher(_build_settings())
+    await pub.start()
+    await pub.publish_payment_webhook(refund_payload)
+
+    instance = fake_kafka["instance"]
+    sent = instance.sent[0]
+    assert sent["key"] == b"INV-9"
+    # JSON-serialized body should mark transactionId as null.
+    assert b'"transactionId":null' in sent["value"]
+
+
 async def test_publish_wraps_broker_error(fake_kafka) -> None:
     pub = KafkaPaymentPublisher(_build_settings())
     await pub.start()
