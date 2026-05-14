@@ -117,9 +117,12 @@ class KafkaPaymentPublisher:
         from aiokafka.errors import KafkaError
 
         body = payload.model_dump_json().encode("utf-8")
-        # Partition by transactionId so retries land on the same partition
-        # and downstream consumers can use it for ordering / dedup.
-        key = payload.transactionId.encode("utf-8")
+        # Partition by transactionId when present so retries land on the same
+        # partition (consumer can use it for ordering / dedup). For REFUNDED
+        # events without transactionId, fall back to invoiceId so refunds for
+        # the same invoice still co-locate.
+        partition_key = payload.transactionId or payload.invoiceId
+        key = partition_key.encode("utf-8")
 
         try:
             metadata = await self._producer.send_and_wait(

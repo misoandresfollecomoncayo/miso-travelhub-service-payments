@@ -58,6 +58,70 @@ async def test_payment_webhook_missing_field(client: AsyncClient) -> None:
     assert response.status_code == 422
 
 
+async def test_payment_webhook_refunded_accepts_minimal_payload(
+    client: AsyncClient, fake_publisher: FakePaymentEventPublisher
+) -> None:
+    """REFUNDED only needs status + message + invoiceId."""
+    payload = {
+        "status": "REFUNDED",
+        "message": "Reembolso emitido",
+        "invoiceId": "INV-9",
+    }
+
+    response = await client.post("/api/v1/payment-webhook", json=payload)
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body == {
+        "received": True,
+        "transactionId": None,
+        "status": "REFUNDED",
+    }
+
+    assert len(fake_publisher.published) == 1
+    published = fake_publisher.published[0]
+    assert published.status.value == "REFUNDED"
+    assert published.invoiceId == "INV-9"
+    assert published.transactionId is None
+    assert published.amount is None
+    assert published.currency is None
+
+
+async def test_payment_webhook_refunded_with_optional_fields_passes_through(
+    client: AsyncClient, fake_publisher: FakePaymentEventPublisher
+) -> None:
+    """REFUNDED still accepts the full payload when the gateway sends it."""
+    payload = {**VALID_PAYLOAD, "status": "REFUNDED"}
+
+    response = await client.post("/api/v1/payment-webhook", json=payload)
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "REFUNDED"
+    assert response.json()["transactionId"] == VALID_PAYLOAD["transactionId"]
+    assert fake_publisher.published[0].amount == Decimal(str(VALID_PAYLOAD["amount"]))
+
+
+async def test_payment_webhook_non_refunded_rejects_missing_optional_fields(
+    client: AsyncClient, fake_publisher: FakePaymentEventPublisher
+) -> None:
+    """For any status != REFUNDED, the rest of the fields are still required."""
+    payload = {
+        "status": "APPROVED",
+        "message": "ok",
+        "invoiceId": "INV-1",
+    }
+
+    response = await client.post("/api/v1/payment-webhook", json=payload)
+
+    assert response.status_code == 422
+    body = response.json()
+    error_text = str(body)
+    # The validator's message should mention the fields that were missing.
+    for missing in ("amount", "currency", "transactionId", "processedAt"):
+        assert missing in error_text
+    assert fake_publisher.published == []
+
+
 async def test_payment_webhook_returns_503_on_config_error(
     client: AsyncClient, fake_publisher: FakePaymentEventPublisher
 ) -> None:
