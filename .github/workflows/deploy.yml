@@ -97,5 +97,11 @@ jobs:
             KAFKA_SECURITY_PROTOCOL=${{ vars.KAFKA_SECURITY_PROTOCOL }}
             KAFKA_SASL_MECHANISM=${{ vars.KAFKA_SASL_MECHANISM }}
             KAFKA_SASL_USERNAME=${{ vars.KAFKA_SASL_USERNAME }}
+            NEW_RELIC_LICENSE_KEY=${{ secrets.NEW_RELIC_LICENSE_KEY }}
+            NEW_RELIC_APP_NAME=${{ vars.NEW_RELIC_APP_NAME || 'miso-travelhub-service-payments' }}
+            NEW_RELIC_ENVIRONMENT=${{ vars.NEW_RELIC_ENVIRONMENT || 'production' }}
+            NEW_RELIC_LOG=stdout
+            NEW_RELIC_LOG_LEVEL=${{ vars.NEW_RELIC_LOG_LEVEL || 'info' }}
+            NEW_RELIC_DISTRIBUTED_TRACING_ENABLED=true
           secrets: |
             ${{ vars.KAFKA_SASL_PASSWORD_SECRET && format('KAFKA_SASL_PASSWORD={0}:latest', vars.KAFKA_SASL_PASSWORD_SECRET) || '' }}

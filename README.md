@@ -102,6 +102,12 @@ Ver [.env.example](.env.example) para la lista completa.
 | `KAFKA_SASL_MECHANISM`      | —                                    | Requerido si protocol incluye SASL (`PLAIN`/`SCRAM-SHA-256`/...)   |
 | `KAFKA_SASL_USERNAME`       | —                                    | Requerido si SASL                                                  |
 | `KAFKA_SASL_PASSWORD`       | —                                    | Requerido si SASL — montar desde Secret Manager en producción      |
+| `NEW_RELIC_LICENSE_KEY`     | —                                    | Vacío → agente desactivado. En prod montarlo desde Secret Manager  |
+| `NEW_RELIC_APP_NAME`        | `miso-travelhub-service-payments`    | Nombre visible en la UI de New Relic                               |
+| `NEW_RELIC_ENVIRONMENT`     | `development`                        | `development` \| `staging` \| `production`                         |
+| `NEW_RELIC_LOG`             | `stdout`                             | `stdout` \| `stderr` \| ruta de archivo                            |
+| `NEW_RELIC_LOG_LEVEL`       | `info`                               | `debug` \| `info` \| `warning` \| `error`                          |
+| `NEW_RELIC_DISTRIBUTED_TRACING_ENABLED` | `true`                   |                                                                    |
 
 ## Ejecución local
 
@@ -158,12 +164,16 @@ Configurar en `Settings → Secrets and variables → Actions → Variables` (sc
 | `VPC_NETWORK`                  | Solo si Kafka vive en IP privada — nombre corto de la VPC                 |
 | `VPC_SUBNET`                   | Solo si Kafka vive en IP privada — subnet en la misma región que Cloud Run|
 | `VPC_CONNECTOR`                | Alternativa a `VPC_NETWORK`+`VPC_SUBNET` (Serverless VPC Access)          |
+| `NEW_RELIC_APP_NAME`           | Nombre del servicio en NR (default: `miso-travelhub-service-payments`)    |
+| `NEW_RELIC_ENVIRONMENT`        | `production`                                                              |
+| `NEW_RELIC_LOG_LEVEL`          | `info` (raise a `debug` para troubleshoot)                                |
 
 ### GitHub Actions Secrets requeridos
 
-| Secret           | Propósito                                                              |
-|------------------|------------------------------------------------------------------------|
-| `GCP_SA_KEY`     | JSON del SA con permisos para deploy a Cloud Run + push a Artifact Registry |
+| Secret                  | Propósito                                                                   |
+|-------------------------|-----------------------------------------------------------------------------|
+| `GCP_SA_KEY`            | JSON del SA con permisos para deploy a Cloud Run + push a Artifact Registry |
+| `NEW_RELIC_LICENSE_KEY` | License key de New Relic. Vacío → agente desactivado                        |
 
 ### Networking
 
@@ -175,6 +185,47 @@ Además, el firewall de la VPC debe permitir egress hacia la VM de Kafka en el p
 
 - `roles/compute.networkUser` sobre la subnet (si se usa Direct VPC egress)
 - `roles/secretmanager.secretAccessor` sobre `KAFKA_SASL_PASSWORD` (si se usa SASL)
+
+## Observabilidad — New Relic
+
+El servicio inicializa el agente de New Relic en [`app/core/observability.py`](app/core/observability.py), llamado **antes** de cualquier import de framework en [`app/main.py`](app/main.py). Esto garantiza que los import hooks alcancen a instrumentar FastAPI, httpx, asyncpg, etc.
+
+### Qué se captura
+
+- **Auto-instrumentación**: cada request HTTP a `/api/v1/payment-webhook` es una transacción NR con su latencia, errores y trace distribuido.
+- **`/health` se excluye** del tracing (`newrelic.agent.ignore_transaction()`) para no inflar la cuota con liveness probes.
+- **Kafka publish** se envuelve con `@newrelic.agent.function_trace(name="kafka/publish_payment_webhook")` y se etiqueta con atributos custom (`kafka.topic`, `kafka.tx_id`, `kafka.invoice_id`, `payment.status`). Errores del publish llaman a `notice_error()` con contexto.
+- **httpx** se auto-instrumenta (si llamas a otros servicios, aparecen como external spans).
+
+### Activación
+
+Es opcional: si `NEW_RELIC_LICENSE_KEY` está vacío, el agente queda inactivo y el servicio funciona normal. Para activarlo:
+
+1. En GitHub `Settings → Secrets and variables → Actions → **Secrets**`, agrega:
+
+   | Secret                  | Valor                          |
+   |-------------------------|--------------------------------|
+   | `NEW_RELIC_LICENSE_KEY` | `<tu-license-key-de-newrelic>` |
+
+2. (Opcional) En `Variables`, ajusta nombre del servicio o entorno:
+
+   | Variable                | Valor                                 |
+   |-------------------------|---------------------------------------|
+   | `NEW_RELIC_APP_NAME`    | `miso-travelhub-service-payments`     |
+   | `NEW_RELIC_ENVIRONMENT` | `production`                          |
+   | `NEW_RELIC_LOG_LEVEL`   | `info`                                |
+
+3. Redeploy. Verás en logs:
+   ```
+   New Relic agent initialized: app_name=miso-travelhub-service-payments environment=production
+   Observability: New Relic agent ACTIVE
+   ```
+
+> **Nota de seguridad**: la license key se pasa como env var al servicio de Cloud Run en texto plano. Para producción real con datos sensibles, considera mover la key a GCP Secret Manager (montarla vía el bloque `secrets:` del workflow en lugar de `env_vars:`).
+
+### Tests
+
+Los tests **no inicializan** el agente (no hay license key en CI), así que los decoradores son no-ops. No se hacen llamadas a NR durante `pytest`.
 
 ## Notas de operación
 

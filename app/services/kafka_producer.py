@@ -1,6 +1,7 @@
 import logging
 from typing import Any, Protocol
 
+import newrelic.agent
 from fastapi import Request
 
 from app.core.config import Settings
@@ -105,10 +106,24 @@ class KafkaPaymentPublisher:
         self._producer = None
         self._started = False
 
+    @newrelic.agent.function_trace(name="kafka/publish_payment_webhook")
     async def publish_payment_webhook(
         self, payload: PaymentWebhookPayload
     ) -> str | None:
         s = self._settings
+
+        # Enrich the active New Relic transaction with payment context.
+        # When no transaction is active (e.g. tests, NR disabled), these
+        # calls are safe no-ops.
+        newrelic.agent.add_custom_attributes(
+            [
+                ("kafka.topic", s.kafka_topic),
+                ("kafka.tx_id", payload.transactionId or ""),
+                ("kafka.invoice_id", payload.invoiceId),
+                ("payment.status", payload.status.value),
+            ]
+        )
+
         if not s.kafka_enabled:
             raise KafkaConfigError("Kafka is disabled (KAFKA_ENABLED=false)")
         if self._producer is None:
@@ -133,6 +148,13 @@ class KafkaPaymentPublisher:
                 "Kafka publish failed tx=%s topic=%s",
                 payload.transactionId,
                 s.kafka_topic,
+            )
+            # Surface this error in the NR transaction with full context.
+            newrelic.agent.notice_error(
+                attributes={
+                    "kafka.topic": s.kafka_topic,
+                    "kafka.tx_id": payload.transactionId or "",
+                }
             )
             raise KafkaPublishError(str(exc)) from exc
 

@@ -1,12 +1,20 @@
-import logging
-from contextlib import asynccontextmanager
+# --- New Relic bootstrap --------------------------------------------------
+# Must run BEFORE importing any instrumented framework (FastAPI, httpx,
+# aiokafka, asyncpg, ...). The agent installs import hooks at init time.
+from app.core.observability import initialize_newrelic  # noqa: E402
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+_NR_ACTIVE = initialize_newrelic()
+# -------------------------------------------------------------------------
 
-from app.api.v1.router import api_router
-from app.core.config import get_settings
-from app.services.kafka_producer import KafkaPaymentPublisher
+import logging  # noqa: E402
+from contextlib import asynccontextmanager  # noqa: E402
+
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+from app.api.v1.router import api_router  # noqa: E402
+from app.core.config import get_settings  # noqa: E402
+from app.services.kafka_producer import KafkaPaymentPublisher  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,6 +93,13 @@ def create_app() -> FastAPI:
     app.include_router(api_router, prefix="/api/v1")
 
     _log_kafka_config()
+    if _NR_ACTIVE:
+        logger.info("Observability: New Relic agent ACTIVE")
+    else:
+        logger.warning(
+            "Observability: New Relic agent INACTIVE "
+            "(set NEW_RELIC_LICENSE_KEY to enable)"
+        )
 
     return app
 
