@@ -7,6 +7,15 @@ on:
       - main
   workflow_dispatch:
 
+# WIF (Workload Identity Federation) requiere que GitHub emita un OIDC
+# token al runner. Sin id-token:write el step de auth falla con
+# "OIDC token requested but the workflow doesn't have the required
+# permissions". El permiso se aplica a nivel workflow porque los dos jobs
+# son del mismo origen de confianza.
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   test:
     name: Run tests
@@ -47,11 +56,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
+      - name: Authenticate to Google Cloud (WIF, no SA key)
         id: auth
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SERVICE_ACCOUNT }}
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
